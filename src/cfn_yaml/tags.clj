@@ -6,33 +6,54 @@
            (org.yaml.snakeyaml.constructor Construct Constructor)
            (org.yaml.snakeyaml.representer Represent)))
 
+(defprotocol IEdn
+  (to-edn [_]))
+
+(extend-type Object
+  IEdn
+  (to-edn [x] x))
+
 (defrecord !Sub [string bindings]
   yaml/YAMLCodec
   (decode [data keywords]
     data)
   (encode [data]
-    data))
+    data)
+  IEdn
+  (to-edn [_]
+    {"Fn::Sub" (cond-> [(to-edn string)]
+                 bindings
+                 (conj (into {} (map (fn [[k v]] [(to-edn k) (to-edn v)])) bindings)))}))
 
 (defrecord !Ref [logicalName]
   yaml/YAMLCodec
   (decode [data keywords]
     data)
   (encode [data]
-    data))
+    data)
+  IEdn
+  (to-edn [_]
+    {"Ref" logicalName}))
 
 (defrecord !Cidr [ipBlock count cidrBits]
   yaml/YAMLCodec
   (decode [data keywords]
     data)
   (encode [data]
-    data))
+    data)
+  IEdn
+  (to-edn [_]
+    {"Fn::Cidr" (mapv to-edn [ipBlock count cidrBits])}))
 
 (defrecord !Base64 [valueToEncode]
   yaml/YAMLCodec
   (decode [data keywords]
     data)
   (encode [data]
-    data))
+    data)
+  IEdn
+  (to-edn [_]
+    {"Fn::Base64" (to-edn valueToEncode)}))
 
 ;; https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-findinmap.html
 (defrecord !FindInMap [mapName topLevelKey secondLevelKey]
@@ -40,7 +61,10 @@
   (decode [data keywords]
     data)
   (encode [data]
-    data))
+    data)
+  IEdn
+  (to-edn [_]
+    {"Fn::FindInMap" (mapv to-edn [mapName topLevelKey secondLevelKey])}))
 
 ;; https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-getatt.html
 (defrecord !GetAtt [logicalNameOfResource attributeName]
@@ -48,7 +72,10 @@
   (decode [data keywords]
     data)
   (encode [data]
-    data))
+    data)
+  IEdn
+  (to-edn [_]
+    {"Fn::GetAtt" (mapv to-edn [logicalNameOfResource attributeName])}))
 
 ;; https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-join.html
 (defrecord !Join [delimiter list-of-values]
@@ -56,7 +83,10 @@
   (decode [data keywords]
     data)
   (encode [data]
-    data))
+    data)
+  IEdn
+  (to-edn [_]
+    {"Fn::Join" [(to-edn delimiter) (mapv to-edn list-of-values)]}))
 
 (defn constructors [get-constructor]
   (let [construct #(.construct (get-constructor %) %)]
