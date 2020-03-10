@@ -11,7 +11,7 @@
 
 (defn decode-key [s keywords]
   (cond
-    (and (string? s) (.contains s "/")) s ;; / means namespace separator in keywords
+    (and (string? s) (.contains ^String s "/")) s ;; / means namespace separator in keywords
     (and (string? s) keywords) (keyword s)
     :else s))
 
@@ -30,7 +30,7 @@
         (.put lhm (yaml/encode k) (yaml/encode v)))
       lhm)))
 
-(defn make-yaml []
+(defn ^Yaml make-yaml []
   (let [representers-field (-> Representer
                                .getSuperclass
                                .getSuperclass
@@ -54,12 +54,12 @@
                     (doto (DumperOptions.)
                       (.setDefaultFlowStyle DumperOptions$FlowStyle/BLOCK)))]
     (doseq [accessible-object [representers-field yaml-constructors-field get-constructor represent-data]]
-      (.setAccessible accessible-object true))
-    (.putAll (.get yaml-constructors-field constructor)
+      (.setAccessible ^java.lang.reflect.Field accessible-object true))
+    (.putAll ^java.util.HashMap (.get yaml-constructors-field constructor)
              (tags/constructors #(.invoke get-constructor
                                           constructor
                                           (into-array org.yaml.snakeyaml.nodes.Node [%]))))
-    (.putAll (.get representers-field representer)
+    (.putAll ^java.util.HashMap (.get representers-field representer)
              (tags/representers #(.invoke represent-data
                                           representer
                                           (into-array Object [%]))))
@@ -91,7 +91,7 @@
                                        cfn_yaml.tags.!Ref [(:logicalName x)]
                                        cfn_yaml.tags.!Sub (->> (re-seq #"\$\{([^\}]+)" (:string x))
                                                                (map second)
-                                                               (filter #(not (.contains % "::")))))))
+                                                               (filter #(not (.contains ^String % "::")))))))
                              (apply concat)))
         unresolved-references (set/difference references referrables)]
     (when-not (empty? unresolved-references)
@@ -99,7 +99,7 @@
                       {:unresolved unresolved-references})))))
 
 (defn parse* [yml]
-  (yaml/decode (.load (make-yaml) yml) true))
+  (yaml/decode (.load (make-yaml) ^String yml) true))
 
 (defn parse [yml]
   (let [cfn (parse* yml)]
