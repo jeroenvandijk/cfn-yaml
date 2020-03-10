@@ -13,6 +13,10 @@
   IEdn
   (to-edn [x] x))
 
+(extend-type nil
+  IEdn
+  (to-edn [x] nil))
+
 (defrecord !Sub [string bindings]
   yaml/YAMLCodec
   (decode [data keywords]
