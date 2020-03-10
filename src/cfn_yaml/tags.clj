@@ -1,7 +1,7 @@
 (ns cfn-yaml.tags
   (:require [clojure.string :as str]
             [clj-yaml.core :as yaml])
-  (:import (org.yaml.snakeyaml.nodes ScalarNode SequenceNode MappingNode NodeTuple Tag NodeId)
+  (:import (org.yaml.snakeyaml.nodes ScalarNode SequenceNode MappingNode NodeTuple Tag NodeId  Node)
            (org.yaml.snakeyaml DumperOptions$ScalarStyle DumperOptions$FlowStyle)
            (org.yaml.snakeyaml.constructor Construct Constructor)
            (org.yaml.snakeyaml.representer Represent)))
@@ -89,68 +89,80 @@
     {"Fn::Join" [(to-edn delimiter) (mapv to-edn list-of-values)]}))
 
 (defn constructors [get-constructor]
-  (let [construct #(.construct (get-constructor %) %)]
-    (->> [[!Ref #(->!Ref (.getValue %))]
+  (let [construct #(.construct ^Construct (get-constructor %) %)]
+    (->> [[!Ref #(->!Ref (.getValue ^ScalarNode %))]
           [!Sub (fn [node]
-                  (if (= NodeId/scalar (.getNodeId node))
-                    (->!Sub (.getValue node) {})
-                    (->!Sub (-> node .getValue first .getValue)
-                            (into {}
-                                  (map #(do [(-> % .getKeyNode .getValue) (construct (.getValueNode %))]))
-                                  (-> node .getValue second .getValue)))))]
-          [!Cidr (fn [node] (apply ->!Cidr (map construct (.getValue node))))]
-          [!FindInMap (fn [node] (apply ->!FindInMap (map construct (.getValue node))))]
-          [!GetAtt (fn [node] (apply ->!GetAtt (clojure.string/split (.getValue node) #"\.")))]
-          [!Join (fn [node] (let [[delimiter list-of-values] (map construct (.getValue node))]
+                  (if (= NodeId/scalar (.getNodeId ^Node node))
+                    (->!Sub (.getValue ^ScalarNode node) {})
+                    (let [[tpl m] (.getValue ^SequenceNode node)]
+                      (->!Sub (.getValue ^ScalarNode tpl)
+                              (into {}
+                                    (map (fn [^NodeTuple n]
+                                           [(construct (.getValueNode n))]))
+                                    (.getValue ^MappingNode m))))))]
+          [!Cidr (fn [^SequenceNode node] (apply ->!Cidr (map construct (.getValue node))))]
+          [!FindInMap (fn [^SequenceNode node] (apply ->!FindInMap (map construct (.getValue node))))]
+          [!GetAtt (fn [^ScalarNode node] (apply ->!GetAtt (clojure.string/split (.getValue node) #"\.")))]
+          [!Join (fn [^SequenceNode node] (let [[delimiter list-of-values] (map construct (.getValue node))]
                              (->!Join delimiter list-of-values)))]
           [!Base64 (fn [node]
-                     (condp = (.getNodeId node)
-                       NodeId/scalar (->!Base64 (.getValue node))
+                     (condp = (.getNodeId ^Node node)
+                       NodeId/scalar (->!Base64 (.getValue ^ScalarNode node))
                        NodeId/mapping (->!Base64 (into {}
-                                                       (map (fn [node-tuple]
+                                                       (map (fn [^NodeTuple node-tuple]
                                                               [(construct (.getKeyNode node-tuple))
                                                                (construct (.getValueNode node-tuple))]))
-                                                       (.getValue node)))))]]
+                                                       (.getValue ^MappingNode node)))))]]
          (into {} (map (fn [[klass f]]
-                         [(Tag. (.getSimpleName klass)) (reify org.yaml.snakeyaml.constructor.Construct
+                         [(Tag. (.getSimpleName ^Class klass)) (reify org.yaml.snakeyaml.constructor.Construct
                                                           (construct [this node]
                                                             (f node)))]))))))
 
-(defn scalar-node [tag value & {:keys [style] :or {style DumperOptions$ScalarStyle/PLAIN}}]
+(defn scalar-node [tag ^String value & {:keys [^org.yaml.snakeyaml.DumperOptions$ScalarStyle style] :or {style DumperOptions$ScalarStyle/PLAIN}}]
   (ScalarNode. (if (string? tag)
-                 (Tag. tag)
-                 tag)
+                 (Tag. ^String tag)
+                 ^Tag tag)
                value
                nil
                nil
                style))
 
+
 (defn representers [represent-data]
   (let [represent-map (fn [m & {:keys [tag] :or {tag Tag/MAP}}]
-                        (MappingNode. tag
-                                      (for [[k v] m]
-                                        (NodeTuple. (represent-data k) (represent-data v)))
-                                      DumperOptions$FlowStyle/BLOCK))]
+                        (MappingNode. ^Tag tag
+                                      (java.util.Arrays/asList
+                                       (into-array NodeTuple
+                                                   (for [[k v] m] (NodeTuple. (represent-data k) (represent-data v)))))
+                                     DumperOptions$FlowStyle/BLOCK))]
     (->> [[!Ref #(scalar-node "!Ref" (:logicalName %))]
           [!Sub (fn [{:keys [string bindings]}]
                   (if (empty? bindings)
-                    (scalar-node "!Sub" string :style (if (.contains string "\n")
+                    (scalar-node "!Sub" string :style (if (.contains ^String string "\n")
                                                                DumperOptions$ScalarStyle/LITERAL
                                                                DumperOptions$ScalarStyle/PLAIN))
                     (SequenceNode. (Tag. "!Sub")
-                                   [(scalar-node Tag/STR string) (represent-map bindings)]
+                                   (java.util.Arrays/asList (into-array ScalarNode [(scalar-node Tag/STR string) (represent-map bindings)] ))
                                    DumperOptions$FlowStyle/BLOCK)))]
           [!Cidr #(SequenceNode. (Tag. "!Cidr")
-                                 [(scalar-node Tag/STR (:ipBlock %) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)
-                                  (scalar-node Tag/INT (str (:count %)))
-                                  (scalar-node Tag/INT (str (:cidrBits %)))]
+                                 (java.util.Arrays/asList
+                                  (into-array ScalarNode
+                                              [(scalar-node Tag/STR (:ipBlock %) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)
+                                               (scalar-node Tag/INT (str (:count %)))
+                                               (scalar-node Tag/INT (str (:cidrBits %)))]))
                                  DumperOptions$FlowStyle/FLOW)]
           [!FindInMap #(SequenceNode. (Tag. "!FindInMap")
-                                      [(scalar-node Tag/STR (:mapName %) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)
-                                       (scalar-node Tag/STR (:topLevelKey %) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)
-                                       (scalar-node Tag/STR (:secondLevelKey %) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)]
+                                      (java.util.Arrays/asList
+                                       (into-array ScalarNode
+                                                   [(scalar-node Tag/STR (:mapName %) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)
+                                                    (scalar-node Tag/STR (:topLevelKey %) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)
+                                                    (scalar-node Tag/STR (:secondLevelKey %) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)]))
                                       DumperOptions$FlowStyle/FLOW)]
           [!GetAtt #(scalar-node "!GetAtt" (str (:logicalNameOfResource %) "." (:attributeName %)))]
+          #_[!Join #(SequenceNode. (Tag. "!Join")
+                                 [(scalar-node Tag/STR (:delimiter %) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)
+                                  (sequence-node Tag/SEQ (map  scalar-node-str (:list-of-values %)) :style DumperOptions$ScalarStyle/DOUBLE_QUOTED)]
+                                 DumperOptions$FlowStyle/FLOW)]
           [!Base64 (fn [{:keys [valueToEncode]}]
                      (cond
                        (string? valueToEncode) (scalar-node "!Base64" valueToEncode)
