@@ -114,7 +114,7 @@
   (generate-string* cfn-data))
 
 (defn to-edn [cfn-data]
-  (clojure.walk/prewalk tags/to-edn cfn-data))
+  (clojure.walk/postwalk tags/to-edn cfn-data))
 
 (defn parse-and-print [filename]
   (println (.dump (make-yaml) (yaml/encode (parse (slurp filename))))))
