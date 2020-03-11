@@ -30,6 +30,7 @@
         (.put lhm (yaml/encode k) (yaml/encode v)))
       lhm)))
 
+;; Overview of method signatures: https://www.javadoc.io/doc/org.yaml/snakeyaml/1.19/index-all.html
 (defn ^Yaml make-yaml []
   (let [representers-field (-> Representer
                                .getSuperclass
